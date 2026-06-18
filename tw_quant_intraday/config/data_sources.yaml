@@ -1,0 +1,23 @@
+# Data source configuration
+sources:
+  twse:
+    enabled: true
+    request_interval: 3.5
+  tpex:
+    enabled: true
+  finmind:
+    enabled: true
+    token: ""
+  yfinance:
+    enabled: true
+  ctbc:
+    enabled: false
+    api_url: "https://www.win168.com.tw"
+    note: "Requires CTBC account + API access approval"
+
+fetch:
+  default_source: twse
+  bulk_batch_size: 10
+  retry_count: 2
+  save_raw: true
+  output_dir: data/daily

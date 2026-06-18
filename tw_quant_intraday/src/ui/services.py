@@ -15,6 +15,7 @@ from src.data_sources.intraday_quote import LocalIntradayQuoteProvider
 from src.data_sources.mock_data import make_mock_intraday
 from src.data_sources.twse_daily import LocalDailyCsvSource
 from src.data_sources.twse_official import TwseOfficialDailyClient, write_twse_daily_csv
+from src.data_sources.tw_market_data import TwMarketDataProvider
 from src.execution.manual_order_ticket import signal_to_ticket_row, write_manual_order_ticket
 from src.market.cost_model import CostConfig, TaiwanStockCostModel
 from src.risk.risk_manager import RiskDecision, RiskLimits, RiskManager, RiskState
@@ -393,3 +394,46 @@ def fetch_twse_for_ui(stock_ids: list[str], start: str, end: str, output: str) -
         "start": start,
         "end": end,
     }
+
+
+def fetch_all_stocks_for_ui() -> dict[str, Any]:
+    provider = TwMarketDataProvider()
+    stocks = provider.fetch_all_stock_list(refresh=True)
+    output = PROJECT_ROOT / "data" / "processed" / "all_stocks.csv"
+    provider.save_stock_list_csv(stocks, output)
+    return {"total": len(stocks),
+            "twse": sum(1 for s in stocks if s.market == "twse"),
+            "tpex": sum(1 for s in stocks if s.market == "tpex"),
+            "file": str(output.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+            "stocks": [{"stock_id": s.stock_id, "stock_name": s.stock_name,
+                         "market": s.market, "industry": s.industry} for s in stocks[:200]]}
+
+
+def fetch_all_market_daily_for_ui(trade_date: str, market: str = "all") -> dict[str, Any]:
+    provider = TwMarketDataProvider()
+    frame = provider.fetch_all_market_daily(trade_date, market)
+    if frame.empty:
+        return {"rows": 0, "date": trade_date, "message": "no data"}
+    safe_date = trade_date.replace("-", "")
+    output = PROJECT_ROOT / "data" / "daily" / f"all_market_{safe_date}.csv"
+    provider.save_daily_csv(frame, output)
+    return {"rows": int(len(frame)), "date": trade_date, "market": market,
+            "file": str(output.relative_to(PROJECT_ROOT)).replace("\\", "/")}
+
+
+def fetch_bulk_history_for_ui(stock_ids: list[str], start: str, end: str,
+                               source: str = "twse") -> dict[str, Any]:
+    provider = TwMarketDataProvider()
+    frame = provider.fetch_bulk_history(stock_ids, start, end, source)
+    safe_label = f"bulk_{start.replace(chr(45), str())}_{end.replace(chr(45), str())}"
+    output = PROJECT_ROOT / "data" / "daily" / f"{safe_label}.csv"
+    provider.save_daily_csv(frame, output)
+    return {"rows": int(len(frame)), "stocks": stock_ids, "start": start, "end": end,
+            "source": source, "file": str(output.relative_to(PROJECT_ROOT)).replace("\\", "/")}
+
+
+def fetch_realtime_for_ui(stock_ids: list[str]) -> dict[str, Any]:
+    provider = TwMarketDataProvider()
+    frame = provider.fetch_realtime(stock_ids)
+    return {"count": int(len(frame)),
+            "quotes": frame.to_dict(orient="records") if not frame.empty else []}

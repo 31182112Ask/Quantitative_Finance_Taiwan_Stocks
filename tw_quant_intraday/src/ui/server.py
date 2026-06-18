@@ -11,6 +11,10 @@ from src.ui.services import (
     BenchmarkUiRequest,
     StrategyBatchScanRequest,
     StrategyScanRequest,
+    fetch_all_market_daily_for_ui,
+    fetch_all_stocks_for_ui,
+    fetch_bulk_history_for_ui,
+    fetch_realtime_for_ui,
     fetch_twse_for_ui,
     list_data_files,
     run_benchmark_ui,
@@ -62,6 +66,24 @@ class UiRequestHandler(SimpleHTTPRequestHandler):
                     start=str(payload["start"]),
                     end=str(payload["end"]),
                     output=str(payload["output"]),
+                )
+            elif path == "/api/fetch-all-stocks":
+                result = fetch_all_stocks_for_ui()
+            elif path == "/api/fetch-all-daily":
+                result = fetch_all_market_daily_for_ui(
+                    trade_date=str(payload.get("date", "")),
+                    market=str(payload.get("market", "all")),
+                )
+            elif path == "/api/fetch-bulk-history":
+                result = fetch_bulk_history_for_ui(
+                    stock_ids=[str(s).strip() for s in payload.get("stock_ids", [])],
+                    start=str(payload["start"]),
+                    end=str(payload["end"]),
+                    source=str(payload.get("source", "twse")),
+                )
+            elif path == "/api/fetch-realtime":
+                result = fetch_realtime_for_ui(
+                    stock_ids=[str(s).strip() for s in payload.get("stock_ids", [])],
                 )
             else:
                 self.send_error(HTTPStatus.NOT_FOUND)

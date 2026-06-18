@@ -15,6 +15,7 @@ from src.data_sources.intraday_quote import LocalIntradayQuoteProvider
 from src.data_sources.mock_data import make_mock_daily, make_mock_intraday
 from src.data_sources.twse_official import TwseOfficialDailyClient, write_twse_daily_csv
 from src.data_sources.twse_daily import LocalDailyCsvSource
+from src.data_sources.tw_market_data import TwMarketDataProvider
 from src.execution.manual_order_ticket import write_manual_order_ticket
 from src.execution.signal_exporter import export_approved_manual_tickets
 from src.market.cost_model import CostConfig, TaiwanStockCostModel
@@ -186,6 +187,56 @@ def ui_cmd(args: argparse.Namespace) -> None:
     run_ui_server(args.host, args.port)
 
 
+
+def fetch_all_stocks_cmd(args: argparse.Namespace) -> None:
+    ensure_project_dirs()
+    provider = TwMarketDataProvider()
+    stocks = provider.fetch_all_stock_list(refresh=True)
+    output = PROJECT_ROOT / "data" / "processed" / "all_stocks.csv"
+    provider.save_stock_list_csv(stocks, output)
+    twse_count = sum(1 for s in stocks if s.market == "twse")
+    tpex_count = sum(1 for s in stocks if s.market == "tpex")
+    print(f"Fetched {len(stocks)} stocks: {twse_count} TWSE + {tpex_count} TPEX -> {output}")
+
+
+def fetch_all_daily_cmd(args: argparse.Namespace) -> None:
+    ensure_project_dirs()
+    provider = TwMarketDataProvider()
+    frame = provider.fetch_all_market_daily(args.date, args.market)
+    if frame.empty:
+        print(f"No data for {args.date} (may be non-trading day)")
+        return
+    output = PROJECT_ROOT / args.output
+    provider.save_daily_csv(frame, output)
+    print(f"Fetched {len(frame)} stocks for {args.date} -> {output}")
+
+
+def fetch_bulk_history_cmd(args: argparse.Namespace) -> None:
+    ensure_project_dirs()
+    provider = TwMarketDataProvider()
+    stock_ids = args.stocks
+    if args.all:
+        stocks = provider.fetch_all_stock_list(refresh=True)
+        stock_ids = [s.stock_id for s in stocks]
+        print(f"Fetching history for ALL {len(stock_ids)} stocks...")
+    def progress(c, t, sid):
+        print(f"  [{c}/{t}] {sid}")
+    frame = provider.fetch_bulk_history(stock_ids, args.start, args.end, args.source, progress_callback=progress)
+    output = PROJECT_ROOT / args.output
+    provider.save_daily_csv(frame, output)
+    print(f"Fetched {len(frame)} rows for {len(stock_ids)} stocks -> {output}")
+
+
+def fetch_realtime_cmd(args: argparse.Namespace) -> None:
+    provider = TwMarketDataProvider()
+    frame = provider.fetch_realtime(args.stocks)
+    if frame.empty:
+        print("No realtime data (market may be closed)")
+        return
+    for _, row in frame.iterrows():
+        print(f"  {row['stock_id']} {row['stock_name']}: price={row['price']} vol={row['volume']}")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Taiwan stock research assistant. Manual outputs only.")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -237,6 +288,28 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
     p.set_defaults(func=ui_cmd)
+
+    p = sub.add_parser("fetch-all-stocks", help="Fetch all TWSE+TPEX stock list")
+    p.set_defaults(func=fetch_all_stocks_cmd)
+
+    p = sub.add_parser("fetch-all-daily", help="Fetch all-market daily for one date")
+    p.add_argument("--date", default=date.today().isoformat())
+    p.add_argument("--market", default="all", choices=["all", "twse", "tpex"])
+    p.add_argument("--output", default="data/daily/all_market_daily.csv")
+    p.set_defaults(func=fetch_all_daily_cmd)
+
+    p = sub.add_parser("fetch-bulk-history", help="Fetch historical data for multiple stocks")
+    p.add_argument("--stocks", nargs="*", default=["2330", "2317"])
+    p.add_argument("--all", action="store_true", help="Fetch ALL listed stocks")
+    p.add_argument("--start", default="2026-01-01")
+    p.add_argument("--end", default="2026-06-18")
+    p.add_argument("--source", default="twse", choices=["twse", "finmind", "yfinance"])
+    p.add_argument("--output", default="data/daily/bulk_history.csv")
+    p.set_defaults(func=fetch_bulk_history_cmd)
+
+    p = sub.add_parser("fetch-realtime", help="Fetch realtime quotes (market hours only)")
+    p.add_argument("--stocks", nargs="+", default=["2330", "2317"])
+    p.set_defaults(func=fetch_realtime_cmd)
     return parser
 
 

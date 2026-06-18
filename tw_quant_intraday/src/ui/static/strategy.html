@@ -148,10 +148,10 @@ input[type="checkbox"]{width:16px;height:16px;accent-color:var(--teal)}
 
 /* === KV TABLE === */
 .kv-table{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
-.kv-row{display:grid;grid-template-columns:minmax(180px,220px) minmax(0,1fr);column-gap:12px;font-size:13px;border-bottom:1px solid var(--border-light)}
+.kv-row{display:grid;grid-template-columns:160px 1fr;font-size:13px;border-bottom:1px solid var(--border-light)}
 .kv-row:last-child{border-bottom:none}
 .kv-row:nth-child(odd){background:var(--surface-alt)}
-.kv-key{padding:10px 14px;color:var(--ink-secondary);font-weight:500;overflow-wrap:anywhere}
+.kv-key{padding:10px 14px;color:var(--ink-secondary);font-weight:500}
 .kv-val{padding:10px 14px;font-family:'JetBrains Mono',monospace;font-size:12px;word-break:break-all}
 
 /* === TUTORIAL === */
@@ -312,10 +312,6 @@ input[type="checkbox"]{width:16px;height:16px;accent-color:var(--teal)}
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
                     執行掃描
                   </button>
-                  <button class="btn btn-secondary" id="runBatchScan" style="width:100%;margin-top:10px">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 5h18"/><path d="M3 12h18"/><path d="M3 19h18"/></svg>
-                    掃描全部股票
-                  </button>
                 </div>
               </div>
             </div>
@@ -341,7 +337,7 @@ input[type="checkbox"]{width:16px;height:16px;accent-color:var(--teal)}
                 <div class="metric-sub" id="metricRiskHint">&nbsp;</div>
               </div>
               <div class="metric-card green">
-                <div class="metric-label">建議股數</div>
+                <div class="metric-label">建議張數</div>
                 <div class="metric-value" id="metricQty">—</div>
                 <div class="metric-sub" id="metricQtyHint">&nbsp;</div>
               </div>
@@ -374,22 +370,6 @@ input[type="checkbox"]{width:16px;height:16px;accent-color:var(--teal)}
               </div>
               <div class="panel-body">
                 <div id="ticketRows" class="kv-table"></div>
-              </div>
-            </div>
-
-            <div class="panel" id="batchPanel" style="display:none;margin-top:16px">
-              <div class="panel-header">
-                <div class="panel-title">全股票策略流水線</div>
-                <span class="panel-badge" id="batchSummaryBadge">BATCH</span>
-              </div>
-              <div class="panel-body">
-                <div class="msg success" id="batchSafety" style="margin-bottom:12px">僅輸出人工委託票，不會登入券商或自動下單。</div>
-                <h3 style="font-size:14px;margin:0 0 8px">1. 選股池</h3>
-                <div id="selectionTable" style="margin-bottom:16px"></div>
-                <h3 style="font-size:14px;margin:0 0 8px">2. 盤中策略</h3>
-                <div id="intradayTable" style="margin-bottom:16px"></div>
-                <h3 style="font-size:14px;margin:0 0 8px">3. 短期交易策略</h3>
-                <div id="shortTermTable"></div>
               </div>
             </div>
           </div>
@@ -441,7 +421,7 @@ input[type="checkbox"]{width:16px;height:16px;accent-color:var(--teal)}
               <div class="step-num">5</div>
               <div class="step-content">
                 <h4>審閱結果</h4>
-                <p>檢視策略輸出：方向（BUY/HOLD）、進場價、停損價、停利價、建議股數。HOLD 表示目前條件不符合進場標準，附有原因說明。</p>
+                <p>檢視策略輸出：方向（BUY/HOLD）、進場價、停損價、停利價、建議張數。HOLD 表示目前條件不符合進場標準，附有原因說明。</p>
               </div>
             </div>
             <div class="step">
@@ -601,60 +581,6 @@ function renderKV(targetId,data){
   });
 }
 
-function renderMiniTable(targetId,cols,rows,emptyText='無資料'){
-  const el=document.getElementById(targetId);
-  if(!rows||!rows.length){
-    el.innerHTML=`<div class="msg">${emptyText}</div>`;
-    return;
-  }
-  const header=cols.map(c=>`<th>${c.label}</th>`).join('');
-  const body=rows.map(row=>{
-    const cells=cols.map(c=>{
-      let value=typeof c.value==='function'?c.value(row):(row[c.key]??'');
-      const cls=c.mono?' class="mono"':'';
-      return `<td${cls}>${value??''}</td>`;
-    }).join('');
-    return `<tr>${cells}</tr>`;
-  }).join('');
-  el.innerHTML=`<table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table>`;
-}
-
-function renderBatchResult(result){
-  const panel=document.getElementById('batchPanel');
-  panel.style.display='block';
-  const summary=result.summary||{};
-  document.getElementById('batchSummaryBadge').textContent=`${summary.selected_count||0}/${summary.stock_count||0}`;
-  document.getElementById('batchSafety').textContent=result.ticket_write_error
-    ? `${result.safety} | 人工委託票 ${summary.approved_ticket_count||0} 筆 | 票檔未寫入：${result.ticket_write_error}`
-    : `${result.safety} | 人工委託票 ${summary.approved_ticket_count||0} 筆`;
-
-  renderMiniTable('selectionTable',[
-    {key:'stock_id',label:'股票',mono:true},
-    {key:'stock_name',label:'名稱'},
-    {key:'score',label:'分數',mono:true},
-    {key:'selected',label:'入選',value:r=>r.selected?'是':'否'},
-    {key:'close',label:'收盤',mono:true,value:r=>r.close?Number(r.close).toFixed(2):''},
-    {key:'reason',label:'原因'}
-  ],result.stock_selection||[]);
-
-  renderMiniTable('intradayTable',[
-    {key:'stock_id',label:'股票',mono:true},
-    {key:'status',label:'資料狀態'},
-    {key:'side',label:'盤中訊號',value:r=>r.signal?(r.signal.side||'HOLD'):'NO_DATA'},
-    {key:'reason',label:'原因',value:r=>r.signal?(r.signal.reason||r.signal.invalid_reason||''):''}
-  ],result.intraday||[],'沒有可用盤中資料；可切換 Demo mock，但不得視為真實即時行情。');
-
-  renderMiniTable('shortTermTable',[
-    {key:'stock_id',label:'股票',mono:true},
-    {key:'stock_name',label:'名稱'},
-    {key:'profile',label:'模式'},
-    {key:'side',label:'方向'},
-    {key:'entry_price',label:'進場',mono:true,value:r=>r.entry_price?Number(r.entry_price).toFixed(2):''},
-    {key:'approved',label:'風控',value:r=>r.approved?'通過':'未通過'},
-    {key:'reason',label:'策略原因'}
-  ],result.short_term||[]);
-}
-
 /* === Run Scan === */
 document.getElementById('runScan').addEventListener('click',async()=>{
   setStatus('running','掃描中...');
@@ -708,9 +634,7 @@ document.getElementById('runScan').addEventListener('click',async()=>{
     const msgEl=document.getElementById('sourceStatus');
     if(side==='BUY'&&approved){
       msgEl.className='msg success';
-      msgEl.textContent=result.ticket_write_error
-        ? `訊號通過風控，但票檔未寫入：${result.ticket_write_error} | ${result.source_status}`
-        : `✓ 訊號通過風控 | ${result.source_status} | ${result.safety}`;
+      msgEl.textContent=`✓ 訊號通過風控 | ${result.source_status} | ${result.safety}`;
     }else if(side==='BUY'&&!approved){
       msgEl.className='msg warning';
       msgEl.textContent=`⚠ 訊號觸發但風控未通過：${decision.reason} | ${result.source_status}`;
@@ -737,30 +661,6 @@ document.getElementById('runScan').addEventListener('click',async()=>{
     setStatus('error','錯誤');
     document.getElementById('sourceStatus').className='msg error';
     document.getElementById('sourceStatus').textContent='❌ '+error.message;
-  }
-});
-
-document.getElementById('runBatchScan').addEventListener('click',async()=>{
-  setStatus('running','全股票掃描中...');
-  try{
-    const result=await postJson('/api/strategy-batch-scan',{
-      daily_file:val('dailyFile'),
-      trade_date:val('tradeDate'),
-      trade_time:val('tradeTime'),
-      equity:Number(val('equity')),
-      intraday_source:val('intradaySource'),
-      write_ticket:val('writeTicket'),
-      strategy_profile:'balanced'
-    });
-    renderBatchResult(result);
-    const summary=result.summary||{};
-    document.getElementById('sourceStatus').className='msg success';
-    document.getElementById('sourceStatus').textContent=`全股票掃描完成：股票 ${summary.stock_count||0} 檔，入選 ${summary.selected_count||0} 檔，短期買入訊號 ${summary.short_term_signal_count||0} 筆，人工委託票 ${summary.approved_ticket_count||0} 筆。${result.ticket_write_error?' 票檔未寫入：'+result.ticket_write_error:''}`;
-    setStatus('done','完成');
-  }catch(error){
-    setStatus('error','錯誤');
-    document.getElementById('sourceStatus').className='msg error';
-    document.getElementById('sourceStatus').textContent='✕ '+error.message;
   }
 });
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
+import math
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -18,6 +19,7 @@ from src.execution.manual_order_ticket import signal_to_ticket_row, write_manual
 from src.market.cost_model import CostConfig, TaiwanStockCostModel
 from src.risk.risk_manager import RiskDecision, RiskLimits, RiskManager, RiskState
 from src.strategies.opening_range_breakout import OpeningRangeBreakoutStrategy
+from src.strategies.recommendation import balanced_t_plus_one_signal, stock_selection_snapshot
 from src.strategies.t_plus_one_swing import TPlusOneSwingStrategy
 
 TAIPEI = ZoneInfo("Asia/Taipei")
@@ -37,6 +39,17 @@ class StrategyScanRequest:
 
 
 @dataclass(frozen=True)
+class StrategyBatchScanRequest:
+    daily_file: str = "data/daily/twse_2026_05_benchmark.csv"
+    trade_date: str = "2026-05-29"
+    trade_time: str = "10:00:00"
+    equity: float = 1_000_000
+    intraday_source: str = "local"
+    write_ticket: bool = True
+    strategy_profile: str = "balanced"
+
+
+@dataclass(frozen=True)
 class BenchmarkUiRequest:
     data_file: str = "data/daily/twse_2026_05_benchmark.csv"
     start: str = "2026-05-01"
@@ -46,6 +59,7 @@ class BenchmarkUiRequest:
     label: str = "ui_benchmark"
     allow_mock: bool = False
     write_files: bool = True
+    strategy_profile: str = "balanced"
 
 
 def _models() -> tuple[TaiwanStockCostModel, RiskManager]:
@@ -66,8 +80,10 @@ def _safe_project_path(relative_path: str) -> Path:
 def _jsonable(value: Any) -> Any:
     if isinstance(value, (pd.Timestamp, datetime, date)):
         return value.isoformat()
-    if isinstance(value, float) and pd.isna(value):
-        return None
+    if isinstance(value, float):
+        if pd.isna(value) or not math.isfinite(value):
+            return None
+        return value
     if isinstance(value, dict):
         return {str(k): _jsonable(v) for k, v in value.items()}
     if isinstance(value, list):
@@ -127,6 +143,7 @@ def run_strategy_scan(request: StrategyScanRequest) -> dict[str, Any]:
     decision: RiskDecision | None = None
     ticket_files: dict[str, str] | None = None
     ticket_row: dict[str, Any] | None = None
+    ticket_write_error: str | None = None
     avg_turnover = request.avg_turnover_20d
     if avg_turnover is None:
         avg_turnover = _avg_turnover(daily, request.stock_id) if not daily.empty else 0.0
@@ -147,19 +164,175 @@ def run_strategy_scan(request: StrategyScanRequest) -> dict[str, Any]:
 
     if request.write_ticket:
         rows = [ticket_row] if ticket_row else []
-        csv_path, md_path = write_manual_order_ticket(rows, PROJECT_ROOT / "reports" / "intraday")
-        ticket_files = {
-            "csv": str(csv_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
-            "md": str(md_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
-        }
+        try:
+            csv_path, md_path = write_manual_order_ticket(rows, PROJECT_ROOT / "reports" / "intraday")
+            ticket_files = {
+                "csv": str(csv_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                "md": str(md_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+            }
+        except OSError as exc:
+            ticket_write_error = f"manual ticket file could not be written: {exc}"
 
     return {
         "signal": signal.to_dict(),
         "risk_decision": _decision_to_dict(decision),
         "ticket": _jsonable(ticket_row),
         "ticket_files": ticket_files,
+        "ticket_write_error": ticket_write_error,
         "source_status": source_status,
         "avg_turnover_20d": avg_turnover,
+        "mode": "manual_ticket_only",
+        "safety": "no broker login, no app automation, no automatic order submission",
+    }
+
+
+def _load_daily_file(relative_path: str) -> pd.DataFrame:
+    daily_path = _safe_project_path(relative_path)
+    if daily_path.exists():
+        return pd.read_csv(daily_path)
+    return LocalDailyCsvSource(PROJECT_ROOT / "data" / "daily").load("daily.csv")
+
+
+def _run_intraday_stage(
+    stock_id: str,
+    trade_date: str,
+    current_time: datetime,
+    intraday_source: str,
+    cost_model: TaiwanStockCostModel,
+) -> dict[str, Any]:
+    if intraday_source == "mock":
+        intraday = make_mock_intraday(stock_id, trade_date)
+        signal = OpeningRangeBreakoutStrategy(cost_model=cost_model).generate(intraday, stock_id, current_time)
+        return {
+            "stock_id": stock_id,
+            "status": "mock_demo_intraday_data_not_realtime",
+            "signal": signal.to_dict(),
+        }
+
+    loaded = LocalIntradayQuoteProvider(PROJECT_ROOT / "data" / "intraday").load(stock_id, trade_date)
+    if loaded.data.empty:
+        return {
+            "stock_id": stock_id,
+            "status": loaded.status,
+            "signal": None,
+        }
+    signal = OpeningRangeBreakoutStrategy(cost_model=cost_model).generate(loaded.data, stock_id, current_time)
+    return {
+        "stock_id": stock_id,
+        "status": loaded.status,
+        "signal": signal.to_dict(),
+    }
+
+
+def run_strategy_batch_scan(request: StrategyBatchScanRequest) -> dict[str, Any]:
+    cost_model, risk_manager = _models()
+    current_time = datetime.fromisoformat(f"{request.trade_date} {request.trade_time}").replace(tzinfo=TAIPEI)
+    daily = _load_daily_file(request.daily_file)
+    if daily.empty:
+        raise ValueError("daily data is empty; fetch or provide a local CSV before scanning")
+
+    daily["date"] = pd.to_datetime(daily["date"])
+    stock_ids = sorted(daily["stock_id"].astype(str).unique())
+    strict_strategy = TPlusOneSwingStrategy(cost_model=cost_model)
+    risk_state = RiskState(equity=float(request.equity))
+    selection_rows: list[dict[str, Any]] = []
+    intraday_rows: list[dict[str, Any]] = []
+    swing_rows: list[dict[str, Any]] = []
+    ticket_rows: list[dict[str, Any]] = []
+
+    for stock_id in stock_ids:
+        selection = stock_selection_snapshot(daily, stock_id, current_time)
+        selection_rows.append(selection)
+        if not selection["selected"]:
+            swing_rows.append(
+                {
+                    "stock_id": stock_id,
+                    "stock_name": selection.get("stock_name", ""),
+                    "stage": "short_term",
+                    "side": "HOLD",
+                    "approved": False,
+                    "reason": f"selection rejected: {selection['reason']}",
+                    "signal": None,
+                    "risk_decision": None,
+                }
+            )
+            continue
+
+        intraday_rows.append(_run_intraday_stage(stock_id, request.trade_date, current_time, request.intraday_source, cost_model))
+        stock_daily = daily[daily["stock_id"].astype(str) == stock_id]
+        signal = strict_strategy.generate(stock_daily, stock_id, current_time)
+        profile_used = "strict"
+        if signal.side != "BUY" and request.strategy_profile == "balanced":
+            signal = balanced_t_plus_one_signal(stock_daily, stock_id, current_time)
+            profile_used = "balanced"
+
+        decision: RiskDecision | None = None
+        ticket_row: dict[str, Any] | None = None
+        if signal.side == "BUY" and signal.entry_price is not None and signal.stop_loss is not None:
+            decision = risk_manager.evaluate_entry(
+                stock_id=signal.stock_id,
+                side=signal.side,
+                entry_price=signal.entry_price,
+                stop_loss=signal.stop_loss,
+                current_time=current_time,
+                state=risk_state,
+                avg_turnover_20d=float(selection.get("avg_turnover_20d") or 0),
+                data_is_fresh=True,
+            )
+            if decision.approved:
+                ticket_row = signal_to_ticket_row(signal, decision.size.quantity, "; ".join(decision.notes), mode="batch_manual_scan")
+                ticket_rows.append(ticket_row)
+                risk_state.trades_today += 1
+                risk_state.daily_turnover += decision.size.amount
+
+        swing_rows.append(
+            {
+                "stock_id": stock_id,
+                "stock_name": signal.stock_name or selection.get("stock_name", ""),
+                "stage": "short_term",
+                "profile": profile_used,
+                "side": signal.side,
+                "confidence": signal.confidence,
+                "entry_price": signal.entry_price,
+                "stop_loss": signal.stop_loss,
+                "take_profit": signal.take_profit,
+                "approved": bool(decision and decision.approved),
+                "reason": signal.reason,
+                "signal": signal.to_dict(),
+                "risk_decision": _decision_to_dict(decision),
+            }
+        )
+
+    ticket_files: dict[str, str] | None = None
+    ticket_write_error: str | None = None
+    if request.write_ticket:
+        try:
+            csv_path, md_path = write_manual_order_ticket(ticket_rows, PROJECT_ROOT / "reports" / "intraday")
+            ticket_files = {
+                "csv": str(csv_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                "md": str(md_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+            }
+        except OSError as exc:
+            ticket_write_error = f"manual ticket file could not be written: {exc}"
+
+    selected_count = sum(1 for row in selection_rows if row["selected"])
+    approved_count = len(ticket_rows)
+    return {
+        "summary": {
+            "data_file": request.daily_file,
+            "stock_count": len(stock_ids),
+            "selected_count": selected_count,
+            "intraday_checked_count": len(intraday_rows),
+            "short_term_signal_count": sum(1 for row in swing_rows if row["side"] == "BUY"),
+            "approved_ticket_count": approved_count,
+            "strategy_profile": request.strategy_profile,
+        },
+        "stock_selection": _jsonable(selection_rows),
+        "intraday": _jsonable(intraday_rows),
+        "short_term": _jsonable(swing_rows),
+        "tickets": _jsonable(ticket_rows),
+        "ticket_files": ticket_files,
+        "ticket_write_error": ticket_write_error,
         "mode": "manual_ticket_only",
         "safety": "no broker login, no app automation, no automatic order submission",
     }
@@ -179,16 +352,22 @@ def run_benchmark_ui(request: BenchmarkUiRequest) -> dict[str, Any]:
             initial_cash=float(request.initial_cash),
             lot_size=int(request.lot_size),
             allow_mock=bool(request.allow_mock),
+            strategy_profile=request.strategy_profile,
         ),
     )
     files: dict[str, str | None]
+    report_write_error: str | None = None
     if request.write_files:
-        trades_path, equity_path, report_path = write_benchmark_report(result, PROJECT_ROOT / "reports" / "daily", request.label)
-        files = {
-            "trades": str(trades_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
-            "equity_curve": str(equity_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
-            "report": str(report_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
-        }
+        try:
+            trades_path, equity_path, report_path = write_benchmark_report(result, PROJECT_ROOT / "reports" / "daily", request.label)
+            files = {
+                "trades": str(trades_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                "equity_curve": str(equity_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+                "report": str(report_path.relative_to(PROJECT_ROOT)).replace("\\", "/"),
+            }
+        except OSError as exc:
+            report_write_error = f"benchmark report files could not be written: {exc}"
+            files = {"trades": None, "equity_curve": None, "report": None}
     else:
         files = {"trades": None, "equity_curve": None, "report": None}
     trades = result.trades.fillna("").to_dict(orient="records")
@@ -199,6 +378,7 @@ def run_benchmark_ui(request: BenchmarkUiRequest) -> dict[str, Any]:
         "trades": _jsonable(trades),
         "equity_curve": _jsonable(equity),
         "files": files,
+        "report_write_error": report_write_error,
     }
 
 

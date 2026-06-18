@@ -454,7 +454,7 @@ async function loadFiles(){
 }
 
 /* === Enhanced Equity Chart === */
-function renderEquityChart(containerId,rows,trades=[]){
+function renderEquityChart(containerId,rows){
   const container=document.getElementById(containerId);
   if(!rows||!rows.length){container.innerHTML='';return;}
 
@@ -497,24 +497,6 @@ function renderEquityChart(containerId,rows,trades=[]){
 
   // Starting value reference line
   const startY=padT+((max-values[0])/span)*plotH;
-  const dateIndex=new Map(dates.map((d,i)=>[d,i]));
-  const yAt=(idx)=>padT+((max-values[idx])/span)*plotH;
-  const markerParts=[];
-  (trades||[]).forEach((trade,idx)=>{
-    const entryIdx=dateIndex.get(trade.entry_date);
-    if(entryIdx!==undefined){
-      const x=padL+(entryIdx/Math.max(values.length-1,1))*plotW;
-      const y=yAt(entryIdx)-10;
-      markerParts.push(`<g><title>BUY ${trade.stock_id} ${trade.entry_date} @ ${trade.entry_price}</title><path d="M ${x} ${y-7} L ${x-7} ${y+6} L ${x+7} ${y+6} Z" fill="#16a34a" stroke="#fff" stroke-width="1.5"/></g>`);
-    }
-    const exitIdx=dateIndex.get(trade.exit_date);
-    if(exitIdx!==undefined){
-      const x=padL+(exitIdx/Math.max(values.length-1,1))*plotW;
-      const y=yAt(exitIdx)+12;
-      markerParts.push(`<g><title>EXIT ${trade.stock_id} ${trade.exit_date} PnL ${Number(trade.pnl||0).toFixed(2)}</title><path d="M ${x} ${y+7} L ${x-7} ${y-6} L ${x+7} ${y-6} Z" fill="#dc2626" stroke="#fff" stroke-width="1.5"/></g>`);
-    }
-  });
-  const markers=markerParts.join('');
 
   container.innerHTML=`
     <svg viewBox="0 0 ${w} ${h}" xmlns="http://www.w3.org/2000/svg">
@@ -530,7 +512,6 @@ function renderEquityChart(containerId,rows,trades=[]){
       <line x1="${padL}" y1="${startY}" x2="${w-padR}" y2="${startY}" stroke="#9ca3af" stroke-dasharray="6,3" stroke-width="1" opacity="0.5"/>
       <polygon points="${fillPoints}" fill="url(#areaGrad)"/>
       <polyline points="${points}" fill="none" stroke="#0d9488" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
-      ${markers}
       <circle cx="${padL}" cy="${startY}" r="3" fill="#9ca3af"/>
       <circle cx="${lastX}" cy="${padT+((max-values[values.length-1])/span)*plotH}" r="4" fill="#0d9488" stroke="#fff" stroke-width="2"/>
     </svg>`;
@@ -607,28 +588,21 @@ document.getElementById('runBenchmark').addEventListener('click',async()=>{
     document.getElementById('advancedMetrics').style.display='grid';
     setText('sharpe',Number(metrics.sharpe||0).toFixed(2));
     setText('sortino',Number(metrics.sortino||0).toFixed(2));
-    const rawPf=metrics.profit_factor;
-    if(rawPf===null||rawPf===undefined){
-      setText('profitFactor',Number(metrics.win_rate||0)>=1?'∞':'—');
-    }else{
-      const pf=Number(rawPf);
-      setText('profitFactor',pf===Infinity?'∞':pf.toFixed(2));
-    }
+    const pf=Number(metrics.profit_factor||0);
+    setText('profitFactor',pf===Infinity?'∞':pf.toFixed(2));
     setText('avgWin',fmtMoney(metrics.avg_win));
     setText('avgLoss',fmtMoney(metrics.avg_loss));
     setText('totalCost',fmtMoney(metrics.cost_total));
 
     // Equity chart
     document.getElementById('equityChartContainer').style.display='block';
-    renderEquityChart('equityChart',result.equity_curve,result.trades);
+    renderEquityChart('equityChart',result.equity_curve);
 
     // Status message
     const msgEl=document.getElementById('resultMsg');
     msgEl.className='msg success';
     const files=result.files||{};
-    msgEl.textContent=result.report_write_error
-      ? `✓ 回測完成 | ${summary.trade_count} 筆交易 | 報酬率 ${ret.toFixed(2)}% | 報告檔未寫入：${result.report_write_error}`
-      : `✓ 回測完成 | ${summary.trade_count} 筆交易 | 報酬率 ${ret.toFixed(2)}% | 報告已存至 ${files.report||'reports/daily/'}`;
+    msgEl.textContent=`✓ 回測完成 | ${summary.trade_count} 筆交易 | 報酬率 ${ret.toFixed(2)}% | 報告已存至 ${files.report||'reports/daily/'}`;
 
     // Trade table
     document.getElementById('tradeTableContainer').style.display='block';

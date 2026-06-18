@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 
 from src.strategies.opening_range_breakout import OpeningRangeBreakoutStrategy
-from src.strategies.t_plus_one_swing import TPlusOneSwingStrategy
+from src.strategies.t_plus_one_swing import TPlusOneSwingParams, TPlusOneSwingStrategy
 
 TAIPEI = ZoneInfo("Asia/Taipei")
 
@@ -26,7 +26,9 @@ def test_opening_range_breakout_emits_buy_after_valid_breakout():
             "updated_at": base + timedelta(minutes=i),
         })
     rows[-1]["price"] = 103
-    rows[-1]["volume"] = 3000
+    for row in rows[-5:]:
+        row["volume"] = 4000
+    rows[-1]["volume"] = 5000
     signal = OpeningRangeBreakoutStrategy().generate(
         pd.DataFrame(rows),
         "2330",
@@ -50,14 +52,14 @@ def test_opening_range_breakout_holds_without_intraday_data():
 def test_t_plus_one_swing_emits_buy_for_breakout_daily_setup():
     rows = []
     for i in range(70):
-        close = 100 + i * 0.2
+        close = 100 + i * 0.18 + ((i % 6) - 2) * 0.25
         rows.append({
             "date": pd.Timestamp("2026-01-01") + pd.Timedelta(days=i),
             "stock_id": "2330",
             "stock_name": "TSMC",
             "open": close - 0.5,
-            "high": close + 0.5,
-            "low": close - 1,
+            "high": close + 0.8,
+            "low": close - 1.2,
             "close": close,
             "volume": 1000 + i * 5,
             "turnover": close * (1000 + i * 5),
@@ -67,7 +69,7 @@ def test_t_plus_one_swing_emits_buy_for_breakout_daily_setup():
     rows[-1]["close"] = rows[-2]["high"] + 2
     rows[-1]["high"] = rows[-1]["close"] + 0.5
     rows[-1]["volume"] = 5000
-    signal = TPlusOneSwingStrategy().generate(
+    signal = TPlusOneSwingStrategy(TPlusOneSwingParams(rsi_upper=85)).generate(
         pd.DataFrame(rows),
         "2330",
         datetime(2026, 6, 18, 14, 0, tzinfo=TAIPEI),

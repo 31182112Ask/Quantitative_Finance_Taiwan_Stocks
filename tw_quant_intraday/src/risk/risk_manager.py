@@ -16,6 +16,7 @@ class RiskLimits:
     max_trades_per_day: int = 6
     max_consecutive_losses: int = 3
     min_avg_turnover_20d: float = 50_000_000
+    order_lot_size: int = 1
     avoid_open_minutes: int = 5
     avoid_close_minutes: int = 10
     require_manual_confirm: bool = True
@@ -96,6 +97,7 @@ class RiskManager:
             stop_loss,
             self.limits.max_trade_loss_pct,
             self.limits.max_position_pct_per_stock,
+            self.limits.order_lot_size,
         )
         amount = expected_amount if expected_amount is not None else size.amount
         if size.quantity <= 0:

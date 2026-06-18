@@ -1,6 +1,7 @@
 # Benchmark Report
 
-Scope: fully execute T+1 Swing BUY signals from local historical daily data.
+Scope: fully execute recommended T+1 Swing signals from local historical daily data.
+Default profile is balanced: strict T+1 signals are used first; otherwise labelled balanced candidates are used.
 Opening Range Breakout is skipped unless intraday bars are supplied.
 
 ## Summary
@@ -8,28 +9,29 @@ Opening Range Breakout is skipped unless intraday bars are supplied.
 - start_date: 2026-05-01
 - end_date: 2026-05-31
 - initial_cash: 1000000.0
-- ending_equity: 1005641.62108085
-- net_profit: 5641.621080850018
-- return_pct: 0.564162108085009
+- ending_equity: 1110483.3593600001
+- net_profit: 110483.35936000012
+- return_pct: 11.048335936000008
 - trade_count: 2
 - lot_size: 1
+- strategy_profile: balanced
 
 ## Metrics
 
-- total_return: 0.00564162108085009
-- cagr: 0.07345740711747828
-- max_drawdown: -0.018593810806056155
-- sharpe: 0.7558673075319527
-- sortino: 9.594805813910934
-- win_rate: 0.5
-- profit_factor: 1.2087328938541102
-- avg_win: 32669.565630849924
-- avg_loss: -27027.94455
-- max_consecutive_losses: 1.0
-- turnover: 4076925.73
+- total_return: 0.11048335936000009
+- cagr: 2.745000613256286
+- max_drawdown: -0.025738989139568735
+- sharpe: 4.118479377908247
+- sortino: 18.045883976595974
+- win_rate: 1.0
+- profit_factor: inf
+- avg_win: 55241.67968
+- avg_loss: 0.0
+- max_consecutive_losses: 0.0
+- turnover: 4147768.0
 - trade_count: 2.0
-- avg_holding_minutes: 810.0
-- cost_total: 13707.10891915
-- slippage_total: 2038.462865
+- avg_holding_minutes: 1080.0
+- cost_total: 14102.640640000001
+- slippage_total: 2073.884
 
 No broker login, app automation, or automatic order submission is performed.

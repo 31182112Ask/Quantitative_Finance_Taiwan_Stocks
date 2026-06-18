@@ -50,6 +50,7 @@ def test_benchmark_runs_and_writes_outputs(tmp_path):
     )
     assert "ending_equity" in result.summary
     assert result.summary["initial_cash"] == 10_000
+    assert result.summary["trade_count"] > 0
     paths = write_benchmark_report(result, tmp_path)
     for path in paths:
         assert path.exists()

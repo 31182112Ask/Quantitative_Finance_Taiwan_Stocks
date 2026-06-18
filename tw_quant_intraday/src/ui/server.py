@@ -9,10 +9,12 @@ from urllib.parse import urlparse
 
 from src.ui.services import (
     BenchmarkUiRequest,
+    StrategyBatchScanRequest,
     StrategyScanRequest,
     fetch_twse_for_ui,
     list_data_files,
     run_benchmark_ui,
+    run_strategy_batch_scan,
     run_strategy_scan,
 )
 
@@ -50,6 +52,8 @@ class UiRequestHandler(SimpleHTTPRequestHandler):
             payload = self._read_json()
             if path == "/api/strategy-scan":
                 result = run_strategy_scan(StrategyScanRequest(**payload))
+            elif path == "/api/strategy-batch-scan":
+                result = run_strategy_batch_scan(StrategyBatchScanRequest(**payload))
             elif path == "/api/benchmark-run":
                 result = run_benchmark_ui(BenchmarkUiRequest(**payload))
             elif path == "/api/fetch-twse":

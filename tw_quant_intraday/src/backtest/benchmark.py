@@ -8,6 +8,7 @@ import pandas as pd
 
 from src.backtest.metrics import performance_metrics
 from src.market.cost_model import TaiwanStockCostModel
+from src.strategies.recommendation import balanced_t_plus_one_signal
 from src.strategies.t_plus_one_swing import TPlusOneSwingParams, TPlusOneSwingStrategy
 
 
@@ -19,6 +20,7 @@ class BenchmarkConfig:
     lot_size: int = 1
     max_holding_days: int = 5
     allow_mock: bool = False
+    strategy_profile: str = "balanced"
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,8 @@ class RecommendedStrategyBenchmark:
                     continue
                 window = stock.iloc[: idx + 1]
                 signal = strategy.generate(window, str(stock_id), signal_day.to_pydatetime())
+                if signal.side != "BUY" and config.strategy_profile == "balanced":
+                    signal = balanced_t_plus_one_signal(window, str(stock_id), signal_day.to_pydatetime())
                 if signal.side != "BUY" or signal.entry_price is None or signal.stop_loss is None:
                     continue
                 entry_row = stock.iloc[idx + 1]
@@ -81,6 +85,7 @@ class RecommendedStrategyBenchmark:
                         "stop_loss": float(signal.stop_loss),
                         "take_profit": float(signal.take_profit) if signal.take_profit is not None else None,
                         "strategy": signal.signal_type,
+                        "profile": config.strategy_profile,
                         "reason": signal.reason,
                     }
                 )
@@ -136,6 +141,7 @@ class RecommendedStrategyBenchmark:
                         "pnl": pnl,
                         "holding_minutes": max((current_date - position["entry_date"]).days, 1) * 270,
                         "strategy": position["strategy"],
+                        "profile": position.get("profile", config.strategy_profile),
                         "exit_reason": exit_reason,
                     }
                 )
@@ -187,6 +193,7 @@ class RecommendedStrategyBenchmark:
             "return_pct": (ending_equity / config.initial_cash - 1) * 100,
             "trade_count": int(len(trades_frame)),
             "lot_size": config.lot_size,
+            "strategy_profile": config.strategy_profile,
         }
         return BenchmarkResult(trades=trades_frame, equity_curve=equity_curve, metrics=metrics, summary=summary)
 
@@ -203,7 +210,8 @@ def write_benchmark_report(result: BenchmarkResult, output_dir: str | Path, labe
     lines = [
         "# Benchmark Report",
         "",
-        "Scope: fully execute T+1 Swing BUY signals from local historical daily data.",
+        "Scope: fully execute recommended T+1 Swing signals from local historical daily data.",
+        "Default profile is balanced: strict T+1 signals are used first; otherwise labelled balanced candidates are used.",
         "Opening Range Breakout is skipped unless intraday bars are supplied.",
         "",
         "## Summary",

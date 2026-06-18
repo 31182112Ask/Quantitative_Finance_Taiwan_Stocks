@@ -1,4 +1,11 @@
-from src.ui.services import BenchmarkUiRequest, StrategyScanRequest, run_benchmark_ui, run_strategy_scan
+from src.ui.services import (
+    BenchmarkUiRequest,
+    StrategyBatchScanRequest,
+    StrategyScanRequest,
+    run_benchmark_ui,
+    run_strategy_batch_scan,
+    run_strategy_scan,
+)
 
 
 def test_strategy_scan_service_returns_signal_and_risk_context():
@@ -34,3 +41,24 @@ def test_benchmark_ui_service_returns_summary_and_files():
     assert result["summary"]["initial_cash"] == 10_000
     assert "return_pct" in result["summary"]
     assert "trades" in result
+    assert result["summary"]["trade_count"] > 0
+
+
+def test_strategy_batch_scan_covers_selection_intraday_and_short_term():
+    result = run_strategy_batch_scan(
+        StrategyBatchScanRequest(
+            daily_file="data/daily/twse_2026_05_benchmark.csv",
+            trade_date="2026-05-29",
+            trade_time="10:00:00",
+            equity=1_000_000,
+            intraday_source="local",
+            write_ticket=False,
+        )
+    )
+    assert result["summary"]["stock_count"] >= 2
+    assert result["summary"]["selected_count"] >= 1
+    assert "stock_selection" in result
+    assert "intraday" in result
+    assert "short_term" in result
+    assert result["summary"]["short_term_signal_count"] >= 1
+    assert result["mode"] == "manual_ticket_only"

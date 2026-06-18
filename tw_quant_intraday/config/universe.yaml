@@ -1,0 +1,8 @@
+universe:
+  include:
+    - stock_id: "2330"
+      stock_name: "TSMC"
+    - stock_id: "2317"
+      stock_name: "Hon Hai"
+  exclude: []
+  min_avg_turnover_20d: 50000000

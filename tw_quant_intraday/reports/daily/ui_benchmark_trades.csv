@@ -1,0 +1,3 @@
+stock_id,signal_date,entry_date,exit_date,entry_price,exit_price,quantity,notional,cost,slippage,pnl,holding_minutes,strategy,exit_reason
+2317,2026-05-05,2026-05-06,2026-05-07,246.5,256.27,4049,2035715.73,6889.16436915,1017.8578650000001,32669.565630849924,270,T_PLUS_ONE_SWING,take_profit
+2317,2026-05-06,2026-05-07,2026-05-12,255.0,250.0,4042,2041210.0,6817.94455,1020.605,-27027.94455,1350,T_PLUS_ONE_SWING,max_holding_days

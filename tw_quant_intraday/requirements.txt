@@ -1,0 +1,9 @@
+pandas
+numpy
+requests
+python-dotenv
+pyyaml
+matplotlib
+pytest
+rich
+pydantic

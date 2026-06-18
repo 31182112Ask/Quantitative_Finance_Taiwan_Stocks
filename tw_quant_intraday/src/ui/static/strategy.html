@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Strategy Client - tw_quant_intraday</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">tw_quant_intraday</div>
+        <nav class="nav">
+          <a class="active" href="/strategy">策略輸出</a>
+          <a href="/benchmark">Benchmark</a>
+        </nav>
+        <div class="safety">Manual ticket only<br />No broker login<br />No app automation</div>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <h1>策略輸出客戶端</h1>
+          <div class="status-pill" id="status">Ready</div>
+        </header>
+        <section class="content">
+          <div class="workspace">
+            <section class="panel">
+              <div class="panel-header">
+                <div class="panel-title">Scan</div>
+              </div>
+              <div class="panel-body">
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="strategy">Strategy</label>
+                    <select id="strategy">
+                      <option value="t_plus_one_swing">T+1 Swing</option>
+                      <option value="opening_range_breakout">Opening Range Breakout</option>
+                    </select>
+                  </div>
+                  <div class="field">
+                    <label for="dailyFile">Daily File</label>
+                    <select id="dailyFile"></select>
+                  </div>
+                  <div class="split">
+                    <div class="field">
+                      <label for="stockId">Stock ID</label>
+                      <input id="stockId" value="2317" />
+                    </div>
+                    <div class="field">
+                      <label for="equity">Equity TWD</label>
+                      <input id="equity" type="number" value="5000000" />
+                    </div>
+                  </div>
+                  <div class="split">
+                    <div class="field">
+                      <label for="tradeDate">Date</label>
+                      <input id="tradeDate" type="date" value="2026-05-29" />
+                    </div>
+                    <div class="field">
+                      <label for="tradeTime">Time</label>
+                      <input id="tradeTime" type="time" step="1" value="10:00:00" />
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label for="avgTurnover">Avg Turnover 20D</label>
+                    <input id="avgTurnover" type="number" value="100000000" />
+                  </div>
+                  <div class="field">
+                    <label for="intradaySource">Intraday Source</label>
+                    <select id="intradaySource">
+                      <option value="local">Local CSV</option>
+                      <option value="mock">Mock Demo</option>
+                    </select>
+                  </div>
+                  <label class="inline">
+                    <input id="writeTicket" type="checkbox" checked />
+                    Write manual ticket files
+                  </label>
+                  <button id="runScan">Run Scan</button>
+                </div>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <div class="panel-title">Output</div>
+              </div>
+              <div class="panel-body">
+                <div class="metrics">
+                  <div class="metric">
+                    <div class="metric-label">Side</div>
+                    <div class="metric-value" id="metricSide">-</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Entry</div>
+                    <div class="metric-value" id="metricEntry">-</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Risk</div>
+                    <div class="metric-value" id="metricRisk">-</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Qty</div>
+                    <div class="metric-value" id="metricQty">-</div>
+                  </div>
+                </div>
+                <div style="height: 14px"></div>
+                <div class="message" id="sourceStatus">No scan yet</div>
+                <div style="height: 14px"></div>
+                <div id="signalRows"></div>
+                <div style="height: 14px"></div>
+                <div id="ticketRows"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+    <script>
+      document.getElementById("runScan").addEventListener("click", async () => {
+        setText("status", "Running");
+        try {
+          const avg = value("avgTurnover");
+          const result = await postJson("/api/strategy-scan", {
+            strategy: value("strategy"),
+            stock_id: value("stockId"),
+            daily_file: value("dailyFile"),
+            trade_date: value("tradeDate"),
+            trade_time: value("tradeTime"),
+            equity: Number(value("equity")),
+            avg_turnover_20d: avg === "" ? null : Number(avg),
+            intraday_source: value("intradaySource"),
+            write_ticket: value("writeTicket"),
+          });
+          const signal = result.signal || {};
+          const decision = result.risk_decision || {};
+          setText("metricSide", signal.side || "-");
+          setText("metricEntry", signal.entry_price ?? "-");
+          setText("metricRisk", decision.approved === undefined ? "-" : decision.approved ? "Approved" : "Blocked");
+          setText("metricQty", decision.size ? decision.size.quantity : "-");
+          document.getElementById("metricRisk").className = `metric-value ${decision.approved ? "positive" : "warn"}`;
+          setText("sourceStatus", `${result.source_status} | ${result.safety}`);
+          objectRows("signalRows", signal);
+          objectRows("ticketRows", result.ticket || { ticket: "No approved manual ticket" });
+          setText("status", "Done");
+        } catch (error) {
+          setText("status", "Error");
+          setText("sourceStatus", error.message);
+        }
+      });
+
+      async function loadDailyFiles() {
+        const data = await getJson("/api/data-files");
+        const select = document.getElementById("dailyFile");
+        select.innerHTML = "";
+        data.files.forEach((file) => {
+          const option = document.createElement("option");
+          option.value = file;
+          option.textContent = file;
+          if (file.includes("twse_2026_05_benchmark")) option.selected = true;
+          select.appendChild(option);
+        });
+      }
+
+      loadDailyFiles();
+    </script>
+  </body>
+</html>

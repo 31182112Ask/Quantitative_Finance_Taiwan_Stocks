@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Benchmark - tw_quant_intraday</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="brand">tw_quant_intraday</div>
+        <nav class="nav">
+          <a href="/strategy">策略輸出</a>
+          <a class="active" href="/benchmark">Benchmark</a>
+        </nav>
+        <div class="safety">Historical data only<br />Mock blocked by default<br />Manual analysis</div>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <h1>Benchmark 測試界面</h1>
+          <div class="status-pill" id="status">Ready</div>
+        </header>
+        <section class="content">
+          <div class="workspace">
+            <section class="panel">
+              <div class="panel-header">
+                <div class="panel-title">Run</div>
+              </div>
+              <div class="panel-body">
+                <div class="form-grid">
+                  <div class="field">
+                    <label for="dataFile">Data File</label>
+                    <select id="dataFile"></select>
+                  </div>
+                  <div class="split">
+                    <div class="field">
+                      <label for="start">Start</label>
+                      <input id="start" type="date" value="2026-05-01" />
+                    </div>
+                    <div class="field">
+                      <label for="end">End</label>
+                      <input id="end" type="date" value="2026-05-31" />
+                    </div>
+                  </div>
+                  <div class="split">
+                    <div class="field">
+                      <label for="initialCash">Initial Cash</label>
+                      <input id="initialCash" type="number" value="10000" />
+                    </div>
+                    <div class="field">
+                      <label for="lotSize">Lot Size</label>
+                      <input id="lotSize" type="number" value="1" />
+                    </div>
+                  </div>
+                  <div class="field">
+                    <label for="label">Output Label</label>
+                    <input id="label" value="ui_benchmark" />
+                  </div>
+                  <label class="inline">
+                    <input id="allowMock" type="checkbox" />
+                    Allow mock data
+                  </label>
+                  <button id="runBenchmark">Run Benchmark</button>
+                  <button class="secondary" id="fetchTwse">Fetch TWSE 2330 2317</button>
+                </div>
+              </div>
+            </section>
+            <section class="panel">
+              <div class="panel-header">
+                <div class="panel-title">Analysis</div>
+              </div>
+              <div class="panel-body">
+                <div class="metrics">
+                  <div class="metric">
+                    <div class="metric-label">Ending Equity</div>
+                    <div class="metric-value" id="endingEquity">-</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Return</div>
+                    <div class="metric-value" id="returnPct">-</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Trades</div>
+                    <div class="metric-value" id="tradeCount">-</div>
+                  </div>
+                  <div class="metric">
+                    <div class="metric-label">Max Drawdown</div>
+                    <div class="metric-value" id="drawdown">-</div>
+                  </div>
+                </div>
+                <div style="height: 14px"></div>
+                <div class="chart" id="equityChart"></div>
+                <div style="height: 14px"></div>
+                <div id="summaryRows"></div>
+                <div style="height: 14px"></div>
+                <div id="tradeTable"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+    <script src="/app.js"></script>
+    <script>
+      async function loadFiles() {
+        const data = await getJson("/api/data-files");
+        const select = document.getElementById("dataFile");
+        select.innerHTML = "";
+        data.files.forEach((file) => {
+          const option = document.createElement("option");
+          option.value = file;
+          option.textContent = file;
+          if (file.includes("twse_2026_05_benchmark")) option.selected = true;
+          select.appendChild(option);
+        });
+      }
+
+      document.getElementById("runBenchmark").addEventListener("click", async () => {
+        setText("status", "Running");
+        try {
+          const result = await postJson("/api/benchmark-run", {
+            data_file: value("dataFile"),
+            start: value("start"),
+            end: value("end"),
+            initial_cash: Number(value("initialCash")),
+            lot_size: Number(value("lotSize")),
+            label: value("label"),
+            allow_mock: value("allowMock"),
+          });
+          const summary = result.summary || {};
+          const metrics = result.metrics || {};
+          setText("endingEquity", formatMoney(summary.ending_equity));
+          setText("returnPct", formatPct(summary.return_pct));
+          document.getElementById("returnPct").className = `metric-value ${classForNumber(summary.return_pct)}`;
+          setText("tradeCount", summary.trade_count ?? "0");
+          setText("drawdown", `${(Number(metrics.max_drawdown || 0) * 100).toFixed(2)}%`);
+          objectRows("summaryRows", { ...summary, ...result.files });
+          renderEquityChart("equityChart", result.equity_curve);
+          renderTable("tradeTable", result.trades, [
+            "stock_id",
+            "signal_date",
+            "entry_date",
+            "exit_date",
+            "entry_price",
+            "exit_price",
+            "quantity",
+            "pnl",
+            "strategy",
+            "exit_reason",
+          ]);
+          setText("status", "Done");
+        } catch (error) {
+          setText("status", "Error");
+          document.getElementById("tradeTable").innerHTML = `<div class="message">${error.message}</div>`;
+        }
+      });
+
+      document.getElementById("fetchTwse").addEventListener("click", async () => {
+        setText("status", "Fetching");
+        try {
+          const result = await postJson("/api/fetch-twse", {
+            stock_ids: ["2330", "2317"],
+            start: "2026-01-01",
+            end: "2026-05-31",
+            output: "data/daily/twse_2026_05_benchmark.csv",
+          });
+          await loadFiles();
+          setText("status", `Fetched ${result.rows} rows`);
+        } catch (error) {
+          setText("status", "Fetch error");
+          document.getElementById("tradeTable").innerHTML = `<div class="message">${error.message}</div>`;
+        }
+      });
+
+      loadFiles();
+    </script>
+  </body>
+</html>

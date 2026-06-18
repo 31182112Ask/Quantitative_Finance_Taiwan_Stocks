@@ -1,0 +1,26 @@
+mode:
+  default: research
+  allowed:
+    - research
+    - paper
+    - live_assist
+
+opening_range_breakout:
+  opening_range_minutes: 15
+  volume_multiplier: 1.5
+  take_profit_r: 2.0
+  stop_buffer_bps: 10
+  max_holding_minutes: 210
+
+t_plus_one_swing:
+  ma_fast: 20
+  ma_slow: 60
+  volume_lookback: 5
+  breakout_lookback: 20
+  stop_loss_pct: 0.035
+  take_profit_pct: 0.07
+  max_holding_days: 5
+
+backtest:
+  initial_cash: 1000000
+  min_history_rows: 60

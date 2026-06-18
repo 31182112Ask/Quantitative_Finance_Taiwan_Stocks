@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tw-quant-intraday"
+version = "0.1.0"
+description = "Taiwan stock short-term and intraday research assistant with no automated order execution."
+requires-python = ">=3.11"
+dependencies = [
+  "pandas",
+  "numpy",
+  "requests",
+  "python-dotenv",
+  "pyyaml",
+  "matplotlib",
+  "rich",
+  "pydantic",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
+asyncio_default_fixture_loop_scope = "function"

@@ -1,596 +1,803 @@
 # AGENTS.md
 
-## 專案名稱
+## 1. Mission
 
-`tw_quant_intraday`
+This repository is developing a Windows-first quantitative trading workstation for the Taiwan-listed leveraged ETF `00663L` (Cathay Taiwan Weighted 2X).
 
-本專案是一個針對台股短期交易與日內交易的本地量化研究與交易輔助系統。系統目標不是直接自動下單，而是建立一套可回測、可監控、可風控、可輸出交易建議的本地工具，最後由使用者透過中信亮點 APP 人工確認下單。
+The active implementation is V2 under `v2/`. Its target is one application with one UI and one event model for:
 
-## 核心原則
+- historical replay and backtesting;
+- real-time paper trading using real market data;
+- future live execution through an official Unified Securities integration;
+- high-refresh TradingView-style visualization;
+- deterministic strategy, risk, order, fill, position and PnL state.
 
-1. 本專案不得實作券商 APP 自動點擊、螢幕操作、自動登入、自動繞過驗證碼、自動提交委託單等功能。
-2. 本專案不得假設中信亮點有公開台股程式交易 API。
-3. 本專案的執行層只允許輸出交易建議、委託清單、風控警示與操作提示。
-4. 所有交易訊號必須經過風控模組檢查後才能輸出。
-5. 所有策略必須先支援回測與紙上交易，不允許直接進入實盤建議。
-6. 所有資料、訊號、參數、交易建議、錯誤與例外都必須記錄到本地檔案。
-7. 系統必須使用 Asia/Taipei 時區。
-8. 系統必須預設使用保守參數，避免過度交易。
-9. 系統必須明確區分「研究模式」、「紙上交易模式」、「實盤輔助模式」。
-10. 本專案不是投資建議系統，不保證獲利。
+The old manual-only CTBC design is obsolete. Do not restore it. Do not create a second unrelated application beside V2.
 
-## 交易定位
+## 2. Agent operating mode
 
-本專案聚焦以下交易型態：
+Work as an autonomous senior software engineer. The requested task is intended to be completed in one Codex/GPT-5.5 conversation whenever technically possible.
 
-1. 短期波段交易：持有 1 至 10 個交易日。
-2. 日內交易：同一交易日內產生買進與賣出建議。
-3. 現股當沖輔助：只針對可當沖標的輸出訊號，不自動下單。
-4. 不支援高頻交易。
-5. 不支援毫秒級撮合。
-6. 不支援融資融券、期貨、選擇權與槓桿交易，除非使用者未來明確新增需求。
+Rules:
 
-## 不做的事情
+1. Read this entire file before editing.
+2. Inspect the repository, current branch, existing tests and current V2 implementation before planning changes.
+3. Do not ask questions that can be resolved from the repository or by choosing a safe, conventional default.
+4. Make a best-effort end-to-end implementation instead of stopping after scaffolding.
+5. Do not spend the task only writing plans, TODO files, interfaces or mock screenshots.
+6. Implement working vertical slices, run them, test them and repair failures.
+7. Use small cohesive modules. Do not place the whole system in one file.
+8. Preserve existing working behavior unless the replacement is demonstrably better.
+9. Keep V1 intact unless the task explicitly asks to delete it.
+10. Work on the current feature branch. Do not merge into `main`.
+11. Do not commit secrets, credentials, certificates, account identifiers or real trading tokens.
+12. At the end, report files changed, commands run, test results, remaining external blockers and exact next steps.
 
-Codex 不得建立以下功能：
+When an external service, proprietary SDK or credential is unavailable:
 
-1. 自動操作中信亮點 APP 或網頁。
-2. 自動提交買賣委託。
-3. 自動讀取簡訊、OTP、憑證或帳戶密碼。
-4. 儲存任何券商帳號密碼。
-5. 使用非官方或違反服務條款的方式抓取券商資料。
-6. 建立無風控的交易機器人。
-7. 建立以「保證獲利」為目標的策略。
-8. 產生未經回測的實盤交易建議。
-9. 使用未標記資料來源的價格資料。
-10. 在沒有交易成本、滑價與延遲假設的情況下宣稱策略有效。
+- define a typed adapter;
+- implement a deterministic local adapter or replay adapter;
+- document the missing configuration;
+- keep live behavior locked;
+- continue completing all work that does not require that external dependency.
 
-## 專案目錄結構
+Never fake successful connectivity to a market-data vendor, exchange or broker.
 
-請建立以下目錄結構：
+## 3. Repository scope
+
+### Protected legacy scope
+
+Existing V1 files outside `v2/` may contain prior research and utilities. Treat them as read-only unless a shared root-level file must be updated.
+
+### Active scope
+
+Primary development belongs in:
 
 ```text
-tw_quant_intraday/
-  AGENTS.md
-  README.md
-  requirements.txt
-  .env.example
-  config/
-    universe.yaml
-    risk.yaml
-    strategy.yaml
-  data/
-    raw/
-    processed/
-    intraday/
-    daily/
-  logs/
-  reports/
-    daily/
-    intraday/
-    paper_trading/
-  notebooks/
-  src/
-    __init__.py
-    config.py
-    calendar_tw.py
-    data_sources/
-      __init__.py
-      twse_daily.py
-      tpex_daily.py
-      finmind_client.py
-      intraday_quote.py
-      data_cache.py
-    market/
-      __init__.py
-      universe.py
-      trading_rules.py
-      cost_model.py
-      liquidity.py
-    features/
-      __init__.py
-      technical.py
-      volume_price.py
-      volatility.py
-      order_flow_proxy.py
-    strategies/
-      __init__.py
-      base.py
-      intraday_momentum.py
-      opening_range_breakout.py
-      vwap_reversion.py
-      t_plus_one_swing.py
-    backtest/
-      __init__.py
-      event_backtester.py
-      vector_backtester.py
-      metrics.py
-      slippage.py
-    risk/
-      __init__.py
-      risk_manager.py
-      position_sizing.py
-      kill_switch.py
-    execution/
-      __init__.py
-      signal_exporter.py
-      manual_order_ticket.py
-      broker_checklist.py
-    paper/
-      __init__.py
-      paper_account.py
-      paper_engine.py
-    reports/
-      __init__.py
-      report_builder.py
-      dashboard_data.py
+v2/
+  backend/
+  frontend/
+  gateway/              # create when implementing the C# broker bridge
+  config/               # create for versioned non-secret configuration
+  data/                 # schemas and local sample/replay data only
+  docs/
+  scripts/
   tests/
-    test_cost_model.py
-    test_risk_manager.py
-    test_position_sizing.py
-    test_backtest_metrics.py
+  README.md
+  setup_v2.bat
+  start_v2.bat
 ```
 
-## 技術棧
-
-使用 Python 3.11 或以上版本。
-
-必要套件：
+Root-level files that may be edited:
 
 ```text
-pandas
-numpy
-requests
-python-dotenv
-pyyaml
-matplotlib
-pytest
-rich
-pydantic
+AGENTS.md
+CODEX_ONE_SHOT.md
+README.md
+.gitignore
+.github/
 ```
 
-可選套件：
+## 4. Current foundation
+
+The current V2 branch already provides:
+
+- React and TypeScript frontend;
+- TradingView Lightweight Charts;
+- FastAPI backend;
+- WebSocket snapshots;
+- deterministic Tick to one-second OHLCV/turnover/VWAP aggregation;
+- EMA9/EMA21 and VWAP demonstration strategy;
+- chart entry, stop, target and signal markers;
+- Paper Broker with fees, ETF sell tax and slippage;
+- position, realized/unrealized PnL, fees and drawdown display;
+- Windows setup and start scripts;
+- a hard-disabled LIVE mode.
+
+Do not replace this with Streamlit, notebooks or a static HTML dashboard. Extend and refactor the existing architecture.
+
+## 5. Product requirements
+
+The finished workstation should support the following modes through the same UI and state contracts.
+
+### BACKTEST
+
+- historical tick or event replay;
+- deterministic virtual clock;
+- play, pause, single-step and speed controls;
+- configurable latency, commission, tax, spread and slippage;
+- identical strategy and risk code to paper/live;
+- reproducible results for the same input and seed;
+- trade list, fill list, equity curve, drawdown and metrics;
+- exportable run configuration and results.
+
+### PAPER
+
+- real-time market-data adapter;
+- Paper Broker only;
+- realistic order lifecycle and fill simulation;
+- persistent session state and audit logs;
+- continuous comparison between strategy theoretical price and simulated fill;
+- no outbound broker order.
+
+### LIVE
+
+- official broker adapter only;
+- default disabled;
+- two-stage configuration and explicit arming;
+- obvious LIVE visual state;
+- account, order, fill and position reconciliation;
+- kill switch, cancel-all and flatten controls;
+- no order submission when data, gateway or reconciliation state is unhealthy.
+
+The UI may share components, but modes must be visually unmistakable.
+
+## 6. Target architecture
+
+Use a deterministic event-driven architecture inspired by mature open-source trading engines without copying their source code.
 
 ```text
-FinMind
-polars
-duckdb
-plotly
-streamlit
+MarketDataAdapter
+  -> Normalizer
+  -> EventBus
+  -> BarAggregator / OrderBookState / FeatureEngine
+  -> StrategyEngine
+  -> RiskEngine
+  -> OrderManager
+  -> ExecutionAdapter (Replay / Paper / Unified)
+  -> Portfolio and PnL
+  -> Persistence and Audit Log
+  -> WebSocket API
+  -> React UI
 ```
 
-第一版不要引入複雜深度學習框架。
+Required principles:
 
-## 資料來源規範
+- domain logic must not import FastAPI or React concerns;
+- adapters depend on domain interfaces, not the reverse;
+- backtest, paper and live use the same strategy/risk/order domain models;
+- timestamps, sequence numbers and source identity are first-class fields;
+- raw events are append-only;
+- state transitions are explicit and testable;
+- no hidden global mutable state for trading logic;
+- use dependency injection or clear construction functions;
+- all money and quantity calculations must have an explicit unit.
 
-第一版資料來源優先順序：
+## 7. Backend conventions
 
-1. TWSE 官方公開資料。
-2. TPEx 官方公開資料。
-3. FinMind。
-4. 本地 CSV 快取。
+Use Python 3.12 or newer.
 
-所有資料模組都必須支援：
+Preferred libraries:
 
-1. 下載資料。
-2. 儲存原始資料。
-3. 轉換為標準欄位。
-4. 本地快取。
-5. 缺漏值檢查。
-6. 異常價格檢查。
-7. 資料時間戳記錄。
+- FastAPI and Uvicorn;
+- Pydantic v2 for API/config schemas;
+- asyncio for I/O;
+- Polars or standard Python for event transforms where useful;
+- DuckDB and Parquet for local analytical storage;
+- SQLite only for small metadata if needed;
+- pytest, pytest-asyncio, Ruff and mypy;
+- structlog or standard logging with JSON formatting.
 
-標準日資料欄位：
+Avoid adding a heavy distributed system for a single-instrument workstation. Redis, Kafka and PostgreSQL are not required for the first complete local version unless a measured need exists.
+
+Backend packages should move toward:
 
 ```text
-date
-stock_id
-stock_name
+v2/backend/app/
+  api/
+  domain/
+    events.py
+    market.py
+    orders.py
+    portfolio.py
+    strategy.py
+    risk.py
+  adapters/
+    market_data/
+    execution/
+    persistence/
+  services/
+    engine.py
+    replay.py
+    reconciliation.py
+  config.py
+  main.py
+```
+
+Refactor incrementally. Keep imports working after every change.
+
+## 8. Frontend conventions
+
+Use React, TypeScript and Vite. Continue using TradingView Lightweight Charts.
+
+Requirements:
+
+- strict TypeScript;
+- no `any` unless isolated and justified;
+- domain/API types centralized;
+- WebSocket reconnect with exponential backoff;
+- stale-data detection;
+- render throttling separated from event processing;
+- responsive desktop layout optimized for 1920x1080 and 2560x1440;
+- usable at 1366x768;
+- do not imitate TradingView branding or proprietary assets;
+- use original layout and labels while following professional charting ergonomics.
+
+The UI must eventually include:
+
+1. symbol, mode, market status and clock;
+2. data-source, connection and latency indicators;
+3. candlestick chart with 1s, 5s, 15s, 1m and 5m views;
+4. VWAP and configurable indicators;
+5. entry, stop, target, trailing-stop and invalidation lines;
+6. signal, order and fill markers that are visually distinct;
+7. risk/reward shaded region where technically practical;
+8. volume and order-flow panels;
+9. five-level order book and spread;
+10. strategy rule checklist with current values and thresholds;
+11. orders, fills, positions and account panels;
+12. realized/unrealized PnL, fees, slippage, equity and drawdown;
+13. replay controls in BACKTEST;
+14. cancel-all, stop-strategy and flatten controls in LIVE;
+15. settings drawer for strategy, risk and cost assumptions.
+
+Do not update the entire chart with full `setData` every 100 ms once an incremental `update` path is available. Use full loading for initialization and incremental updates for real-time events.
+
+## 9. Market-data model
+
+Use exchange time and receive time separately.
+
+Every normalized event must contain as applicable:
+
+```text
+schema_version
+source
+symbol
+session
+exchange_timestamp_ns
+receive_timestamp_ns
+sequence
+is_snapshot
+is_trial
+```
+
+Trade event fields:
+
+```text
+price
+size
+aggressor_side
+trade_id
+```
+
+Order-book fields:
+
+```text
+bid_price_1..5
+bid_size_1..5
+ask_price_1..5
+ask_size_1..5
+```
+
+Required controls:
+
+- deduplication;
+- out-of-order detection;
+- sequence-gap detection when the source provides sequence values;
+- heartbeat timeout;
+- reconnect and resubscribe;
+- snapshot plus incremental recovery when supported;
+- stale-market flag;
+- trial-match and non-trade event filtering;
+- cumulative-volume reconciliation;
+- raw event persistence before derived aggregation when feasible.
+
+Do not treat REST polling as the primary high-refresh feed. Use WebSocket or the official push API where available.
+
+## 10. Bar aggregation
+
+Bars are derived from normalized trades, not from UI timers.
+
+Support:
+
+- one second;
+- five seconds;
+- fifteen seconds;
+- one minute;
+- five minutes.
+
+Each bar should include:
+
+```text
+time
 open
 high
 low
 close
 volume
 turnover
-source
-updated_at
-```
-
-標準盤中資料欄位：
-
-```text
-datetime
-stock_id
-price
-volume
-bid_price
-ask_price
-bid_volume
-ask_volume
-source
-updated_at
-```
-
-若無法取得穩定盤中資料，系統必須降級為日資料策略或手動匯入資料，不得偽造即時資料。
-
-## 交易成本模型
-
-必須建立 `src/market/cost_model.py`。
-
-成本模型至少包含：
-
-1. 買進手續費。
-2. 賣出手續費。
-3. 證券交易稅。
-4. 當沖證交稅。
-5. 手續費最低收費。
-6. 滑價。
-7. 買賣價差。
-8. 延遲成本。
-
-預設參數放在 `config/risk.yaml` 或 `config/strategy.yaml`。
-
-範例：
-
-```yaml
-cost:
-  commission_rate: 0.001425
-  commission_discount: 0.6
-  commission_min: 20
-  stock_transaction_tax: 0.003
-  day_trade_transaction_tax: 0.0015
-  default_slippage_bps: 5
-  min_expected_edge_bps: 30
-```
-
-策略輸出的預期報酬必須大於交易成本、滑價與安全邊際，否則不得輸出買入訊號。
-
-## 風控規範
-
-必須建立 `src/risk/risk_manager.py`。
-
-所有策略訊號必須通過以下風控：
-
-1. 單一標的最大部位。
-2. 單日最大交易金額。
-3. 單日最大虧損。
-4. 單筆最大虧損。
-5. 單日最大交易次數。
-6. 連續虧損停止交易。
-7. 流動性不足不得交易。
-8. 漲跌停附近不得追單。
-9. 開盤前 5 分鐘不追價。
-10. 收盤前 10 分鐘不新增高風險部位。
-11. 當資料延遲或缺漏時停止輸出實盤建議。
-12. 當系統錯誤時停止輸出實盤建議。
-
-預設風控參數：
-
-```yaml
-risk:
-  max_position_pct_per_stock: 0.10
-  max_daily_turnover_pct: 0.30
-  max_daily_loss_pct: 0.02
-  max_trade_loss_pct: 0.008
-  max_trades_per_day: 6
-  max_consecutive_losses: 3
-  min_avg_turnover_20d: 50000000
-  avoid_open_minutes: 5
-  avoid_close_minutes: 10
-  require_manual_confirm: true
-```
-
-## 策略模組規範
-
-所有策略必須繼承 `StrategyBase`。
-
-策略輸入：
-
-```text
-market_data
-features
-positions
-risk_state
-current_time
-```
-
-策略輸出：
-
-```text
-stock_id
-side
-signal_type
-confidence
-entry_price
-stop_loss
-take_profit
-max_position_value
-reason
-invalid_reason
-created_at
-```
-
-`side` 只能是：
-
-```text
-BUY
-SELL
-HOLD
-CLOSE
-```
-
-`signal_type` 只能是：
-
-```text
-INTRADAY_MOMENTUM
-OPENING_RANGE_BREAKOUT
-VWAP_REVERSION
-T_PLUS_ONE_SWING
-RISK_EXIT
-```
-
-## 第一版策略
-
-第一版請實作四個策略。
-
-### 1. Opening Range Breakout
-
-邏輯：
-
-1. 使用開盤後前 15 分鐘高低點作為區間。
-2. 價格突破區間高點且成交量放大時產生買入訊號。
-3. 跌破區間低點或觸發停損時產生出場訊號。
-4. 不在開盤前 15 分鐘內輸出買入訊號。
-5. 不在收盤前 10 分鐘新增買入訊號。
-
-### 2. Intraday Momentum
-
-邏輯：
-
-1. 價格高於 VWAP。
-2. 5 分鐘報酬率為正。
-3. 20 分鐘成交量高於過去均值。
-4. 大盤或類股沒有明顯轉弱。
-5. 通過成本模型後輸出買入訊號。
-
-### 3. VWAP Reversion
-
-邏輯：
-
-1. 價格短線偏離 VWAP 過大。
-2. 成交量未持續放大。
-3. 價格開始回到 VWAP。
-4. 僅針對高流動性標的。
-5. 停損必須緊。
-
-### 4. T+1 Swing
-
-邏輯：
-
-1. 使用日資料。
-2. 價格高於 20 日均線與 60 日均線。
-3. 近 5 日量價結構轉強。
-4. 隔日或數日內出場。
-5. 適合無法穩定取得盤中資料時使用。
-
-## 回測規範
-
-必須建立回測模組，並至少輸出以下指標：
-
-```text
-total_return
-cagr
-max_drawdown
-sharpe
-sortino
-win_rate
-profit_factor
-avg_win
-avg_loss
-max_consecutive_losses
-turnover
 trade_count
-avg_holding_minutes
-cost_total
-slippage_total
+vwap
+buy_volume
+sell_volume
 ```
 
-所有回測必須至少包含：
+Requirements:
 
-1. 交易成本。
-2. 滑價假設。
-3. 不可成交假設。
-4. 停損停利。
-5. 部位限制。
-6. 資料延遲檢查。
-7. 樣本外測試。
+- deterministic bucket boundaries in `Asia/Taipei`;
+- correct handling of missing-trade intervals;
+- configurable empty-bar behavior;
+- final/provisional bar distinction;
+- no mutation of finalized historical bars except through an explicit correction event;
+- unit tests for boundaries, gaps, duplicates, out-of-order ticks and session transitions.
 
-若策略在扣除成本後無正期望，不得輸出為實盤候選策略。
+## 11. Auxiliary data
 
-## 紙上交易規範
+The architecture must permit synchronized inputs for:
 
-必須建立 `paper_trading` 模式。
+- `00663L` trades and five-level order book;
+- Taiwan Weighted Index;
+- near-month Taiwan index futures when a licensed source exists;
+- ETF NAV or estimated NAV when a valid source exists;
+- market/session status.
 
-紙上交易要求：
+Derived features may include:
 
-1. 不連接券商。
-2. 不下單。
-3. 使用本地虛擬帳戶。
-4. 記錄每筆模擬交易。
-5. 每日產生績效報告。
-6. 至少連續 20 個交易日穩定後，才允許進入實盤輔助模式。
+- spread;
+- mid-price;
+- microprice;
+- depth imbalance;
+- trade imbalance;
+- volume velocity;
+- VWAP distance;
+- short-horizon realized volatility;
+- index/futures/ETF short-term divergence.
 
-紙上交易輸出：
+Feature calculations must be pure or state-explicit and unit tested.
+
+## 12. Historical data and replay
+
+Create an adapter capable of reading local CSV and Parquet tick files. Do not require paid data to run tests.
+
+Replay requirements:
+
+- deterministic ordering by exchange timestamp, sequence and receive timestamp;
+- virtual clock;
+- configurable speed including maximum speed;
+- pause and single-step;
+- optional injected latency and packet gaps;
+- same normalized event types as real-time adapters;
+- no look-ahead;
+- reproducible random seed for simulated fills.
+
+Include a small synthetic sample dataset generated by code or stored as a tiny fixture. Clearly label it synthetic.
+
+## 13. Strategy framework
+
+The existing EMA/VWAP strategy is a demonstration, not a claim of profitability.
+
+Create a strategy interface with lifecycle methods such as:
 
 ```text
-reports/paper_trading/trades.csv
-reports/paper_trading/equity_curve.csv
-reports/paper_trading/daily_report.md
+on_start
+on_market_event
+on_bar
+on_order_update
+on_fill
+on_stop
 ```
 
-## 執行層規範
+Strategy output should be an intent, not a direct broker call.
 
-本專案的執行層只負責產生人工下單用資訊。
+At minimum implement configurable examples for:
 
-必須建立：
+- VWAP plus EMA trend/momentum;
+- opening-range breakout;
+- VWAP mean reversion or explicitly document why it is unsuitable for a given regime.
 
-```text
-src/execution/signal_exporter.py
-src/execution/manual_order_ticket.py
-src/execution/broker_checklist.py
-```
-
-人工下單票據格式：
+Each decision must expose:
 
 ```text
-date
+strategy_id
+intent_id
 time
-mode
-stock_id
-stock_name
-side
-suggested_price
-max_price
-stop_loss
+action
+score
+entry_reference
+stop
 take_profit
-suggested_quantity
-suggested_amount
-strategy
-reason
-risk_notes
-manual_confirm_required
+invalidation
+quantity_hint
+reason_codes
+rule_checks
 ```
 
-輸出檔案：
+No opaque AI-generated BUY/SELL signal is allowed in the execution path. Models may assist research, but production decisions must be inspectable and reproducible.
+
+## 14. Cost and fill model
+
+Centralize Taiwan ETF trading costs in configuration.
+
+Model at least:
+
+- commission rate;
+- commission discount;
+- minimum commission;
+- ETF sell transaction tax;
+- spread crossing;
+- configurable slippage ticks;
+- configurable latency;
+- partial fills;
+- rejected and expired orders;
+- marketable and non-marketable limit orders.
+
+Do not hard-code a claim that one commission discount applies to every user. Defaults must be clearly marked as assumptions.
+
+Paper fills should depend on available market information. When only trades are present, use a conservative documented approximation. When order book data is present, use bid/ask and available size.
+
+## 15. Order and execution state machine
+
+Use explicit enums and validated transitions.
+
+Suggested states:
 
 ```text
-reports/intraday/manual_order_ticket.csv
-reports/intraday/manual_order_ticket.md
+CREATED
+RISK_REJECTED
+READY
+SUBMITTING
+ACKNOWLEDGED
+PARTIALLY_FILLED
+FILLED
+CANCEL_PENDING
+CANCELED
+REJECTED
+EXPIRED
+UNKNOWN
 ```
 
-不得直接下單。
+Required behavior:
 
-## 中信亮點人工操作流程
+- idempotent client order IDs;
+- no duplicate submission after timeout without reconciliation;
+- partial fill accounting;
+- cancel/replace tracking;
+- broker and local position reconciliation;
+- restart recovery from persisted state;
+- unknown-state handling that blocks new risk;
+- append-only order/fill audit events.
 
-系統只輸出以下檢查清單：
+## 16. Unified Securities gateway
 
-1. 確認標的是否可交易。
-2. 確認標的是否可當沖。
-3. 確認目前價格與建議價格差距。
-4. 確認單筆風險。
-5. 確認今日累計交易次數。
-6. 確認今日累計損益。
-7. 確認是否接近收盤。
-8. 使用者自行開啟中信亮點。
-9. 使用者自行輸入委託。
-10. 使用者自行確認送出。
+The broker integration is expected to use the official Unified Securities domestic securities API and may require a Windows C# process.
 
-系統不得操作 APP。
+Create a gateway boundary rather than loading proprietary DLLs throughout Python.
 
-## 報告規範
-
-每日產生三份報告：
+Preferred shape:
 
 ```text
-reports/daily/market_summary.md
-reports/intraday/signal_report.md
-reports/paper_trading/performance.md
+v2/gateway/UnifiedBrokerGateway/
+  .NET 8 service
+  broker SDK wrapper
+  local authenticated IPC or WebSocket/gRPC endpoint
+  health endpoint
+  order/update stream
+  account/position query
 ```
 
-報告內容至少包含：
+Python communicates only with the local gateway contract.
 
-1. 今日市場狀態。
-2. 可交易標的數量。
-3. 策略訊號數量。
-4. 被風控擋下的訊號。
-5. 今日建議交易。
-6. 今日不建議交易原因。
-7. 風控狀態。
-8. 紙上交易績效。
-9. 下一交易日注意事項。
+Rules:
 
-## 測試規範
+- proprietary DLLs and certificates are never committed;
+- credentials come from environment variables, Windows credential storage or ignored local config;
+- include an `.env.example` or config example with placeholders only;
+- gateway startup without SDK must fail clearly or run in explicit stub mode;
+- stub mode must be visibly named and cannot claim a live connection;
+- LIVE order submission remains disabled until integration tests and manual arming gates pass.
 
-必須使用 pytest。
+## 17. Risk engine
 
-至少建立以下測試：
+Risk checks execute before every order and continuously while a position exists.
 
-1. 成本模型測試。
-2. 風控測試。
-3. 部位大小測試。
-4. 停損停利測試。
-5. 回測績效指標測試。
-6. 訊號格式測試。
-7. 無資料時不得輸出交易建議測試。
-8. 超過風控限制時不得輸出交易建議測試。
+Implement configurable controls for:
 
-執行：
+- maximum position quantity and notional;
+- maximum order quantity and notional;
+- maximum daily loss;
+- maximum loss per trade;
+- maximum daily trades and turnover;
+- maximum consecutive losses;
+- stale data;
+- disconnected market feed;
+- disconnected broker gateway;
+- unresolved order state;
+- local/broker position mismatch;
+- excessive spread;
+- abnormal slippage;
+- market session restrictions;
+- no new position near forced-flat time;
+- forced flatten before close;
+- global kill switch.
 
-```bash
-pytest
+Risk rejections must include stable machine-readable reason codes and user-readable explanations.
+
+## 18. Persistence and audit
+
+Persist enough state to reconstruct what happened.
+
+Minimum records:
+
+- raw normalized market events or replay source references;
+- bars and features used by the strategy;
+- strategy decisions and rule checks;
+- risk decisions;
+- orders and transitions;
+- fills;
+- position and account snapshots;
+- connection state changes;
+- latency measurements;
+- configuration snapshot;
+- software version or git commit when available.
+
+Use UTC or explicit timezone-aware timestamps internally and display `Asia/Taipei` in the UI.
+
+Do not log secrets or full credential-bearing payloads.
+
+## 19. API and WebSocket contracts
+
+Version public payloads.
+
+Avoid sending the full 600-bar history on every tick. Use:
+
+- initial snapshot;
+- incremental bar update;
+- finalized bar event;
+- indicator update;
+- decision event;
+- order/fill event;
+- account update;
+- health/latency event.
+
+Keep a development snapshot endpoint for diagnostics.
+
+Define shared schemas and add contract tests so frontend and backend fields cannot silently diverge.
+
+## 20. Configuration
+
+Versioned non-secret configuration belongs under `v2/config/`.
+
+Recommended files:
+
+```text
+app.example.yaml
+strategy.example.yaml
+risk.example.yaml
+costs.example.yaml
+market_data.example.yaml
 ```
 
-## 命令列介面
+Support environment overrides.
 
-建立 CLI：
+Every run must know:
 
-```bash
-python -m src.cli fetch-daily
-python -m src.cli build-universe
-python -m src.cli backtest --strategy opening_range_breakout
-python -m src.cli paper-run
-python -m src.cli intraday-scan
-python -m src.cli build-report
+- mode;
+- symbol;
+- timezone;
+- data adapter;
+- execution adapter;
+- strategy configuration;
+- risk configuration;
+- cost/fill assumptions;
+- storage path.
+
+Invalid or unsafe live configuration must fail closed.
+
+## 21. Testing requirements
+
+### Backend unit tests
+
+Cover at least:
+
+- trade normalization;
+- bar boundaries and gaps;
+- indicators and features;
+- strategy transitions;
+- risk rejection reasons;
+- cost calculations;
+- order state transitions;
+- partial fills;
+- PnL and drawdown;
+- replay determinism;
+- persistence/recovery.
+
+### Backend integration tests
+
+Cover:
+
+- replay to strategy to risk to Paper Broker to portfolio;
+- WebSocket initial snapshot and incremental events;
+- disconnect/stale-data behavior;
+- forced-flat behavior;
+- duplicate/out-of-order event handling.
+
+### Frontend tests
+
+Use Vitest and React Testing Library where practical. Cover:
+
+- connection state;
+- mode badge and live lock;
+- decision/risk display;
+- order and position rendering;
+- stale-data warning;
+- incremental event reducer.
+
+### End-to-end smoke test
+
+Prefer Playwright for one local smoke path:
+
+1. launch backend and frontend;
+2. load the workstation;
+3. verify demo/replay data appears;
+4. verify a chart and key panels render;
+5. verify mode and live lock are visible;
+6. capture a screenshot artifact when the environment supports it.
+
+Do not require a real broker or paid feed in CI.
+
+## 22. Quality gates
+
+Run all available commands before declaring completion.
+
+Backend:
+
+```powershell
+cd v2/backend
+python -m compileall app tests
+python -m ruff check .
+python -m mypy app
+python -m pytest -q
 ```
 
-若尚未建立 `src/cli.py`，請建立。
+Frontend:
 
-## README 要求
+```powershell
+cd v2/frontend
+npm ci
+npm run build
+npm test -- --run
+```
 
-README 必須包含：
+If scripts differ after refactoring, update this file and README.
 
-1. 專案目標。
-2. 不自動下單聲明。
-3. 安裝方式。
-4. 資料來源設定。
-5. 回測方式。
-6. 紙上交易方式。
-7. 實盤輔助方式。
-8. 風控規則。
-9. 中信亮點人工操作流程。
-10. 免責聲明。
+A check that cannot run because the environment lacks network access, Node, a proprietary SDK or credentials must be listed exactly. Do not report it as passed.
 
-## 開發順序
+## 23. Windows developer experience
 
-Codex 請依以下順序建立：
+Maintain working commands for a new Windows machine.
 
-1. 專案骨架。
-2. config 模組。
-3. 成本模型。
-4. 風控模型。
-5. 資料下載與快取。
-6. 技術指標。
-7. 策略基類。
-8. 第一版策略。
-9. 回測模組。
-10. 紙上交易模組。
-11. 人工下單票據輸出。
-12. 報告模組。
-13. CLI。
-14. 測試。
-15. README。
+`setup_v2.bat` should:
 
-## 完成標準
+- validate Python and Node versions;
+- create the virtual environment;
+- install backend and frontend dependencies;
+- provide actionable error messages;
+- be safe to rerun.
 
-第一版完成時必須能做到：
+`start_v2.bat` should:
 
-1. 成功下載或讀取台股日資料。
-2. 建立可交易標的池。
-3. 完成至少一個短期策略回測。
-4. 成本模型可計算交易成本。
-5. 風控模型可阻擋高風險交易。
-6. 紙上交易可執行。
-7. 可產生人工下單票據。
-8. 所有核心測試通過。
-9. README 可讓使用者照步驟執行。
-10. 無任何自動下單功能。
+- start backend and frontend;
+- avoid opening duplicate processes when practical;
+- show URLs and log locations;
+- fail clearly when setup is incomplete.
+
+Also provide PowerShell equivalents when useful.
+
+## 24. Documentation
+
+Update `v2/README.md` as implementation changes.
+
+It must clearly state:
+
+- what is real and what is synthetic/stubbed;
+- supported modes;
+- architecture;
+- setup and launch instructions;
+- test commands;
+- data import format;
+- market-data adapter configuration;
+- broker gateway status;
+- risk controls;
+- limitations and known issues.
+
+Do not describe planned functionality as already working.
+
+## 25. Security and safety
+
+- Never store passwords, tokens, certificates or account data in git.
+- Never bypass broker authentication, OTP, certificate checks or rate limits.
+- Never automate a broker web page or desktop UI when an official API is required.
+- Never enable LIVE because a boolean was changed in the frontend.
+- Live arming must be enforced server-side and gateway-side.
+- Bind local services to loopback by default.
+- Authenticate local gateway commands if the gateway can place orders.
+- Validate every inbound event and command.
+- Escape user-visible text and avoid unsafe HTML.
+- Pin or constrain dependencies and keep lockfiles.
+
+## 26. Performance targets
+
+For the small initial symbol set, target:
+
+- process each market event immediately;
+- normal strategy/risk event path under 5 ms on a typical desktop, measured rather than assumed;
+- frontend visual refresh around 50-100 ms;
+- chart updates incremental;
+- batched persistence that does not block the event loop;
+- no unbounded queues or histories;
+- visible latency and queue-depth metrics.
+
+This is a low-latency retail workstation, not exchange-colocated HFT. Do not claim microsecond or guaranteed latency.
+
+## 27. One-pass implementation order
+
+For a broad completion task, execute in this order without stopping for approval:
+
+1. inspect and run the current project;
+2. fix dependency/build/test failures;
+3. introduce domain events and adapter interfaces;
+4. implement deterministic historical replay;
+5. refactor Paper Broker into an order state machine;
+6. add risk engine and session controls;
+7. add incremental WebSocket contracts;
+8. update the React data store and chart updates;
+9. add replay controls, order book, decision, order, fill and PnL panels;
+10. add persistence, exports and recovery;
+11. create the C# gateway skeleton and Python client contract;
+12. keep real broker calls disabled unless the official SDK is actually available;
+13. add tests, CI and documentation;
+14. run the full validation matrix;
+15. repair failures;
+16. provide the final implementation report.
+
+Do not stop after step 3 and call the task complete.
+
+## 28. Definition of done
+
+A substantial V2 implementation is complete only when all applicable items below are true:
+
+- one command installs the project on Windows;
+- one command launches the local workstation;
+- frontend production build succeeds;
+- backend type/lint/tests succeed;
+- historical replay runs through the same strategy/risk/execution pipeline;
+- Paper mode runs with real-time adapter architecture and a deterministic local feed;
+- bars update incrementally and multiple timeframes are available;
+- strategy decisions, risk state, orders, fills and PnL are visible;
+- costs and slippage are included;
+- stale data and disconnects stop new orders;
+- forced-flat and kill-switch behavior are tested;
+- state and audit records persist locally;
+- live mode is visibly and technically locked without valid gateway configuration;
+- documentation accurately distinguishes complete, stubbed and unavailable features;
+- no existing V1 behavior was unintentionally broken.
+
+External market-data subscriptions and broker credentials are not required for local completion, but their adapters and failure-closed boundaries are required.
+
+## 29. Final response format for the coding agent
+
+Return a concise implementation report containing:
+
+```text
+Summary
+Architecture changes
+User-visible features
+Files added/changed
+Tests and exact results
+Commands to run
+External integrations still requiring user credentials/SDK
+Known limitations
+Recommended next task
+```
+
+Do not state that the application is production-ready for real-money trading unless live integration, reconciliation, failure testing and controlled acceptance testing have actually been completed.
